@@ -1,74 +1,78 @@
-FROM fedora:latest
+FROM ubuntu:latest AS builder
 
-RUN dnf -y install https://download1.rpmfusion.org/free/fedora/rpmfusion-free-release-$(rpm -E %fedora).noarch.rpm && \
-    dnf -y install https://download1.rpmfusion.org/nonfree/fedora/rpmfusion-nonfree-release-$(rpm -E %fedora).noarch.rpm && \
-    dnf -y update
-
-RUN dnf install -y autoconf \
-                   automake \
-                   cmake \
-                   freetype-devel \
-                   gcc \
-                   gcc-c++ \
-                   git \
-                   libtool \
-                   make \
-                   nasm \
-                   pkgconfig \
-                   zlib-devel \
-                   numactl \
-                   numactl-devel \
-                   libxcb \
-                   libxcb-devel
-
-# Yasm
-RUN cd /usr/local/src \
-    && git clone --depth 1 git://github.com/yasm/yasm.git \
-    && cd yasm \
-    && autoreconf -fiv \
-    && ./configure --prefix="/usr/local" \
-    && make \
-    && make install
+RUN if [ "$(dpkg --print-architecture)" = "amd64" ]; then \
+      echo "deb http://archive.ubuntu.com/ubuntu noble main universe\n" > /etc/apt/sources.list \
+      && echo "deb http://archive.ubuntu.com/ubuntu noble-updates main universe\n" >> /etc/apt/sources.list \
+      && echo "deb http://security.ubuntu.com/ubuntu noble-security main universe\n" >> /etc/apt/sources.list ; \
+     fi \
+  && apt-get -qqy update \
+  && apt-get upgrade -yq \
+  && apt-get -qqy --no-install-recommends install \
+    autoconf \
+    automake \
+    cmake \
+    libfreetype6 \
+    gcc \
+    build-essential \
+    libtool \
+    make \
+    nasm \
+    pkg-config \
+    zlib1g-dev \
+    numactl \
+    libnuma-dev \
+    libx11-6 \
+    libxcb1 \
+    libxcb1-dev \
+    yasm \
+    wget \
+    unzip \
+  && mkdir -p /usr/local/src
 
 # libx264
 RUN cd /usr/local/src \
-    && git clone --depth 1 https://code.videolan.org/videolan/x264.git \
-    && cd x264 \
+    && wget --no-check-certificate https://code.videolan.org/videolan/x264/-/archive/master/x264-master.zip \
+    && unzip x264-master.zip \
+    && rm x264-master.zip \
+    && cd x264-master \
     && ./configure --prefix="/usr/local" --enable-static \
     && make \
-    && make install
+    && make install \
+    && cd .. \
+    && rm -rf x264-master
 
 # ffmpeg
 RUN cd /usr/local/src \
-    && git clone --depth 1 git://source.ffmpeg.org/ffmpeg \
-    && cd ffmpeg \
-    && PKG_CONFIG_PATH="/usr/local/lib/pkgconfig" ./configure --prefix="/usr/local" \
-                                                              --extra-cflags="-I/usr/local/include" \
-                                                              --extra-ldflags="-L/usr/local/lib" \
-                                                              --pkg-config-flags="--static" \
-                                                              --enable-gpl \
-                                                              --enable-nonfree \
-                                                              --enable-libx264 \
-                                                              --enable-libxcb \
+    && wget --no-check-certificate https://github.com/FFmpeg/FFmpeg/archive/refs/heads/release/7.1.zip \
+    && unzip 7.1.zip \
+    && rm 7.1.zip \
+    && cd FFmpeg-release-7.1 \
+    && PKG_CONFIG_PATH="/usr/local/lib/pkgconfig" ./configure \
+    --prefix="/usr/local" \
+    --extra-cflags="-I/usr/local/include" \
+    --extra-ldflags="-L/usr/local/lib" \
+    --pkg-config-flags="--static" \
+    --enable-gpl \
+    --enable-nonfree \
+    --enable-libx264 \
+    --enable-libxcb \
     && make \
-    && make install
+    && make install \
+    && cd .. \
+    && rm -rf FFmpeg-release-7.1
 
-# Cleanup
-RUN rm -rf /usr/local/src/* \
-    && dnf clean all \
-    && dnf erase -y autoconf \
-                    automake \
-                    cmake \
-                    freetype-devel \
-                    gcc \
-                    gcc-c++ \
-                    git \
-                    libtool \
-                    make \
-                    nasm \
-                    pkgconfig \
-                    zlib-devel \
-                    numactl-devel \
-                    libxcb-devel
+# Final stage
+FROM ubuntu:latest
 
-ENTRYPOINT ["/usr/local/bin/ffmpeg"]
+COPY --from=builder /usr/local /usr/local
+
+RUN apt-get -qqy update \
+  && apt-get -qqy --no-install-recommends install \
+    libx11-6 \
+    libxcb1 \
+    libxcb-shm0 \
+  && rm -rf /var/lib/apt/lists/* /var/cache/apt/*
+
+RUN echo "**** quick test ffmpeg ****" \
+    && ldd /usr/local/bin/ffmpeg \
+    && /usr/local/bin/ffmpeg -version

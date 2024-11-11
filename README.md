@@ -19,3 +19,9 @@ tmux new-session -d -s RecordThis 'podman run --privileged --net host -v /tmp/.X
 
 tmux send-keys -t RecordThis q
 ```
+
+### Build multi-arch images
+
+```bash
+docker buildx build --platform=linux/arm64,linux/amd64 -t ndviet/ffmpeg:latest .
+```
